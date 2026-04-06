@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleExecutable</key>
+  <string>TerminalAppleMusicHelper</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.jow.terminal-apple-music-helper</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>TerminalAppleMusicHelper</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSAppleMusicUsageDescription</key>
+  <string>Terminal Apple Music needs access to your music library and playback controls.</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>Terminal Apple Music captures audio energy to drive the live ASCII visualizer.</string>
+</dict>
+</plist>

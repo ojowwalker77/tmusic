@@ -1,0 +1,7 @@
+#!/bin/zsh
+set -euo pipefail
+
+ROOT="/Users/jow/www/terminal-apple-music"
+
+cd "$ROOT"
+exec bun run src/index.ts
