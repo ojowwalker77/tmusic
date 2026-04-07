@@ -565,16 +565,20 @@ final class MusicService {
 
 final class UnixSocketServer: @unchecked Sendable {
   private let path: String
+  private let parentPID: Int32?
   private let queue = DispatchQueue(
     label: "terminal-apple-music.helper.socket",
     qos: .userInitiated,
     attributes: .concurrent,
   )
+  private let lifecycleQueue = DispatchQueue(label: "terminal-apple-music.helper.lifecycle")
   private let service = MusicService()
   private var listenerFD: Int32 = -1
+  private var parentMonitor: DispatchSourceTimer?
 
-  init(path: String) {
+  init(path: String, parentPID: Int32?) {
     self.path = path
+    self.parentPID = parentPID
   }
 
   func start() throws {
@@ -609,9 +613,46 @@ final class UnixSocketServer: @unchecked Sendable {
       throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
     }
 
+    startParentMonitorIfNeeded()
+
     queue.async { [self] in
       acceptLoop()
     }
+  }
+
+  private func startParentMonitorIfNeeded() {
+    guard let parentPID, parentPID > 1 else { return }
+
+    let monitor = DispatchSource.makeTimerSource(queue: lifecycleQueue)
+    monitor.schedule(deadline: .now() + .seconds(1), repeating: .seconds(1))
+    monitor.setEventHandler { [weak self] in
+      guard getppid() != parentPID else { return }
+      debugLog("parent pid \(parentPID) exited; shutting down helper")
+      self?.stop()
+      exit(0)
+    }
+    parentMonitor = monitor
+    monitor.resume()
+  }
+
+  private func scheduleExit() {
+    lifecycleQueue.asyncAfter(deadline: .now() + .milliseconds(50)) { [weak self] in
+      self?.stop()
+      exit(0)
+    }
+  }
+
+  private func stop() {
+    parentMonitor?.cancel()
+    parentMonitor = nil
+
+    if listenerFD >= 0 {
+      shutdown(listenerFD, SHUT_RDWR)
+      close(listenerFD)
+      listenerFD = -1
+    }
+
+    unlink(path)
   }
 
   private func acceptLoop() {
@@ -707,6 +748,9 @@ final class UnixSocketServer: @unchecked Sendable {
       debugLog("processing method \(request.method)")
       switch request.method {
         case "ping":
+          response = .ok(id: request.id)
+        case "shutdown":
+          scheduleExit()
           response = .ok(id: request.id)
         case "bootstrap":
           response = .ok(id: request.id, bootstrap: try await service.bootstrap())
@@ -807,9 +851,17 @@ if let socketFlagIndex = arguments.firstIndex(of: "--socket"), socketFlagIndex +
 } else {
   socketPath = "/tmp/terminal-apple-music.sock"
 }
+let parentPID: Int32?
+if let parentPIDFlagIndex = arguments.firstIndex(of: "--parent-pid"),
+   parentPIDFlagIndex + 1 < arguments.count,
+   let parsedParentPID = Int32(arguments[parentPIDFlagIndex + 1]) {
+  parentPID = parsedParentPID
+} else {
+  parentPID = nil
+}
 
 do {
-  let server = UnixSocketServer(path: socketPath)
+  let server = UnixSocketServer(path: socketPath, parentPID: parentPID)
   try server.start()
   dispatchMain()
 } catch {

@@ -5,6 +5,7 @@ import type { NowPlaying, Playlist, RepeatMode, Track } from "./types"
 
 type HelperMethod =
   | "ping"
+  | "shutdown"
   | "bootstrap"
   | "playlistTracks"
   | "nowPlaying"
@@ -84,7 +85,53 @@ function registerShutdown() {
   process.on("exit", () => {
     try { helperProcess?.kill() } catch {}
     try { streamSocket?.destroy() } catch {}
+    clearStreamReconnect()
   })
+}
+
+async function findSocketHelperPids(): Promise<number[]> {
+  const proc = Bun.spawn(["/bin/ps", "-axo", "pid=,command="], {
+    cwd: ROOT,
+    stdout: "pipe",
+    stderr: "ignore",
+  })
+
+  const [stdout, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    proc.exited,
+  ])
+
+  if (exitCode !== 0) {
+    return []
+  }
+
+  const pids = stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const match = line.match(/^(\d+)\s+(.*)$/)
+      if (!match) return null
+      const pidText = match[1] ?? ""
+      const command = match[2] ?? ""
+      const pid = Number.parseInt(pidText, 10)
+      if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) {
+        return null
+      }
+      if (!command.includes(HELPER_EXECUTABLE) || !command.includes(`--socket ${SOCKET_PATH}`)) {
+        return null
+      }
+      return pid
+    })
+    .filter((pid): pid is number => pid !== null)
+
+  return [...new Set(pids)]
+}
+
+async function terminateHelperPid(pid: number) {
+  try {
+    process.kill(pid, "SIGTERM")
+  } catch {}
 }
 
 async function buildHelperIfNeeded() {
@@ -179,7 +226,7 @@ async function ensureHelper() {
     await buildHelperIfNeeded()
 
     try { helperProcess?.kill() } catch {}
-    helperProcess = Bun.spawn([HELPER_EXECUTABLE, "--socket", SOCKET_PATH], {
+    helperProcess = Bun.spawn([HELPER_EXECUTABLE, "--socket", SOCKET_PATH, "--parent-pid", String(process.pid)], {
       cwd: ROOT,
       stdout: "ignore",
       stderr: "ignore",
@@ -346,4 +393,37 @@ export async function setShuffle(enabled: boolean): Promise<void> {
 
 export async function setRepeat(mode: RepeatMode): Promise<void> {
   await request("setRepeat", { repeatMode: mode })
+}
+
+export async function shutdown(): Promise<void> {
+  streamActive = false
+  clearStreamReconnect()
+  try { streamSocket?.destroy() } catch {}
+  streamSocket = null
+
+  const trackedHelper = helperProcess
+  helperProcess = null
+  helperStartup = null
+
+  if (await pingHelper()) {
+    try {
+      await sendRaw({
+        id: crypto.randomUUID(),
+        method: "shutdown",
+      }, 750)
+    } catch {}
+  }
+
+  if (trackedHelper) {
+    try { trackedHelper.kill() } catch {}
+    await Promise.race([
+      trackedHelper.exited.then(() => undefined),
+      Bun.sleep(500),
+    ])
+  }
+
+  const socketHelperPids = await findSocketHelperPids()
+  for (const pid of socketHelperPids) {
+    await terminateHelperPid(pid)
+  }
 }

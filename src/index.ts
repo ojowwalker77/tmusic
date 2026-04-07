@@ -21,6 +21,7 @@ let playlistPickerOpen = false
 let playlistPickerSelection = 0
 let stopNowPlayingStream: (() => void) | null = null
 let animTimer: ReturnType<typeof setTimeout> | null = null
+let shutdownPromise: Promise<void> | null = null
 
 function formatTime(s: number): string {
   const m = Math.floor(s / 60)
@@ -441,14 +442,12 @@ renderer.keyInput.on("keypress", async (key: KeyEvent) => {
   }
 
   if (key.ctrl && key.name === "c") {
-    cleanup()
-    renderer.destroy()
-    process.exit(0)
+    await shutdown(0)
+    return
   }
   if (key.name === "q") {
-    cleanup()
-    renderer.destroy()
-    process.exit(0)
+    await shutdown(0)
+    return
   }
 
   switch (key.name) {
@@ -533,6 +532,21 @@ function cleanup() {
   }
 }
 
+async function shutdown(exitCode = 0) {
+  if (shutdownPromise) {
+    return shutdownPromise
+  }
+
+  shutdownPromise = (async () => {
+    cleanup()
+    try { renderer.destroy() } catch {}
+    try { await bridge.shutdown() } catch {}
+    process.exit(exitCode)
+  })()
+
+  return shutdownPromise
+}
+
 async function main() {
   state.libraryStatus = "loading"
   state.playlistStatus = "idle"
@@ -567,5 +581,11 @@ async function main() {
 process.on("exit", () => {
   cleanup()
 })
+
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"] as const) {
+  process.once(signal, () => {
+    void shutdown(0)
+  })
+}
 
 main()
