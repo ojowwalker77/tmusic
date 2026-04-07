@@ -2,6 +2,9 @@
 
 Apple Music in the terminal.
 
+<img width="1920" height="1015" alt="image" src="https://github.com/user-attachments/assets/db91cff0-d993-4d1a-a18f-00d1be72baf9" />
+
+
 ## Requirements
 
 - macOS
